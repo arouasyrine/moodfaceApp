@@ -1,0 +1,13 @@
+{
+    "dart.flutterSdkPath": "C:\\src\\flutter",
+    "files.exclude": {
+        "**/.git": false,
+        "**/.DS_Store": true
+    },
+    "search.exclude": {
+        "**/.dart_tool": true
+    },
+    "dart.analysisExcludedFolders": [
+        "C:\\Users\\Lenovo\\moodface\\.dart_tool"
+    ]
+}
