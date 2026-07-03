@@ -9,3 +9,4 @@ deepface
 gunicorn
 numpy
 psycopg2-binary
+email-validator 
