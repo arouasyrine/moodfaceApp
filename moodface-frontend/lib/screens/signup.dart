@@ -17,11 +17,12 @@ class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _isPasswordVisible = false;
   bool _isConfirmPasswordVisible = false;
-  
+
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmPasswordController = TextEditingController();
+  final TextEditingController _confirmPasswordController =
+      TextEditingController();
   final MoodService _moodService = MoodService();
 
   void _handleSignup() async {
@@ -61,47 +62,93 @@ class _SignupScreenState extends State<SignupScreen> {
         );
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => HomeScreen(cameras: widget.cameras)),
+          MaterialPageRoute(
+            builder: (_) => HomeScreen(cameras: widget.cameras),
+          ),
         );
       } else {
         final errorMsg = result != null && result['message'] != null
             ? result['message']
             : "Échec de l'inscription. Cet email est peut-être déjà utilisé.";
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMsg),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
         );
       }
     }
   }
 
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(email);
+  }
+
+  Future<bool> _confirmGoogleAccountExists() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty || !_isValidEmail(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Veuillez entrer un email Google valide avant de continuer.",
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return false;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final response = await _moodService.checkGoogleAccount(email);
+
+    if (!mounted) return false;
+    Navigator.pop(context);
+
+    if (response == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Impossible de vérifier le compte Google. Réessayez."),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return false;
+    }
+
+    if (response['exists_in_google'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            response['message'] ?? "Ce compte Google n'existe pas.",
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return false;
+    }
+
+    final existsInDb = response['exists_in_db'] == true;
+    final accountName = response['name'] ?? 'Utilisateur Google';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          existsInDb
+              ? "Compte Google trouvé pour $accountName. Vous pouvez continuer."
+              : "Adresse Google vérifiée. Un nouveau compte pourra être créé.",
+        ),
+        backgroundColor: Colors.green,
+      ),
+    );
+
+    return true;
+  }
+
   void _handleSocialSignup(String provider) async {
-    if (provider == "GitHub") {
-      final url = Uri.parse("${MoodService.baseUrl}/auth/github");
-      try {
-        if (await canLaunchUrl(url)) {
-          await launchUrl(url, mode: LaunchMode.externalApplication);
-          if (mounted) {
-            Navigator.pop(context); // Go back to login screen where deep link listener is active
-          }
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Impossible d'ouvrir le navigateur web.")),
-            );
-          }
-        }
-      } catch (e) {
-        print("Erreur lors de l'ouverture du lien : $e");
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Erreur : $e")),
-          );
-        }
+    if (provider == "Google") {
+      if (!await _confirmGoogleAccountExists()) {
+        return;
       }
-      return;
     }
 
     if (!mounted) return;
@@ -111,25 +158,25 @@ class _SignupScreenState extends State<SignupScreen> {
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
 
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      Navigator.pop(context); // Close loading
-      
-      // Réinitialiser les données pour le nouveau compte
-      DataStore().clear();
+    final launched = await _moodService.launchSocialAuth(provider);
 
+    if (!mounted) return;
+    Navigator.pop(context); // Close loading
+
+    if (launched) {
+      if (mounted) {
+        Navigator.pop(
+          context,
+        ); // Retourner à l'écran de connexion pour gérer le deep link
+      }
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Inscription via $provider réussie !"),
-          backgroundColor: Colors.green,
+          content: Text("Impossible d'ouvrir la connexion $provider."),
+          backgroundColor: Colors.red,
         ),
       );
-      
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => HomeScreen(cameras: widget.cameras)),
-      );
-    });
+    }
   }
 
   @override
@@ -141,7 +188,10 @@ class _SignupScreenState extends State<SignupScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Color(0xFF4A148C)),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Color(0xFF4A148C),
+          ),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -153,11 +203,7 @@ class _SignupScreenState extends State<SignupScreen> {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFFF3E5F5),
-                  Colors.white,
-                  Color(0xFFEDE7F6),
-                ],
+                colors: [Color(0xFFF3E5F5), Colors.white, Color(0xFFEDE7F6)],
               ),
             ),
           ),
@@ -207,7 +253,11 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
             ],
           ),
-          child: const Icon(Icons.person_add_rounded, size: 40, color: Colors.white),
+          child: const Icon(
+            Icons.person_add_rounded,
+            size: 40,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(height: 20),
         const Text(
@@ -232,7 +282,8 @@ class _SignupScreenState extends State<SignupScreen> {
             controller: _nameController,
             hint: "Nom complet",
             icon: Icons.person_outline_rounded,
-            validator: (value) => value == null || value.isEmpty ? "Entrez votre nom" : null,
+            validator: (value) =>
+                value == null || value.isEmpty ? "Entrez votre nom" : null,
           ),
           const SizedBox(height: 15),
           _buildTextField(
@@ -240,8 +291,10 @@ class _SignupScreenState extends State<SignupScreen> {
             hint: "Email",
             icon: Icons.email_outlined,
             validator: (value) {
-              if (value == null || value.isEmpty) return 'Veuillez entrer votre email';
-              if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value)) return 'Email invalide';
+              if (value == null || value.isEmpty)
+                return 'Veuillez entrer votre email';
+              if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value))
+                return 'Email invalide';
               return null;
             },
           ),
@@ -252,8 +305,11 @@ class _SignupScreenState extends State<SignupScreen> {
             icon: Icons.lock_outline_rounded,
             isPassword: true,
             showPassword: _isPasswordVisible,
-            onToggleVisibility: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
-            validator: (value) => value != null && value.length < 6 ? "Minimum 6 caractères" : null,
+            onToggleVisibility: () =>
+                setState(() => _isPasswordVisible = !_isPasswordVisible),
+            validator: (value) => value != null && value.length < 6
+                ? "Minimum 6 caractères"
+                : null,
           ),
           const SizedBox(height: 15),
           _buildTextField(
@@ -262,9 +318,12 @@ class _SignupScreenState extends State<SignupScreen> {
             icon: Icons.lock_reset_rounded,
             isPassword: true,
             showPassword: _isConfirmPasswordVisible,
-            onToggleVisibility: () => setState(() => _isConfirmPasswordVisible = !_isConfirmPasswordVisible),
+            onToggleVisibility: () => setState(
+              () => _isConfirmPasswordVisible = !_isConfirmPasswordVisible,
+            ),
             validator: (value) {
-              if (value != _passwordController.text) return "Les mots de passe ne correspondent pas";
+              if (value != _passwordController.text)
+                return "Les mots de passe ne correspondent pas";
               return null;
             },
           ),
@@ -298,7 +357,9 @@ class _SignupScreenState extends State<SignupScreen> {
           suffixIcon: isPassword
               ? IconButton(
                   icon: Icon(
-                    showPassword ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+                    showPassword
+                        ? Icons.visibility_rounded
+                        : Icons.visibility_off_rounded,
                     color: Colors.purple.shade300,
                     size: 20,
                   ),
@@ -308,7 +369,10 @@ class _SignupScreenState extends State<SignupScreen> {
           hintText: hint,
           hintStyle: const TextStyle(color: Colors.black, fontSize: 15),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 16,
+          ),
         ),
         validator: validator,
       ),
@@ -337,11 +401,17 @@ class _SignupScreenState extends State<SignupScreen> {
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
         ),
         child: const Text(
           "S'inscrire",
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
       ),
     );
@@ -351,11 +421,20 @@ class _SignupScreenState extends State<SignupScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        _buildSocialIcon("images/google.webp", () => _handleSocialSignup("Google")),
+        _buildSocialIcon(
+          "images/google.webp",
+          () => _handleSocialSignup("Google"),
+        ),
         const SizedBox(width: 25),
-        _buildSocialIcon("images/facebook.webp", () => _handleSocialSignup("Facebook")),
+        _buildSocialIcon(
+          "images/facebook.webp",
+          () => _handleSocialSignup("Facebook"),
+        ),
         const SizedBox(width: 25),
-        _buildSocialIcon("images/github.webp", () => _handleSocialSignup("GitHub")),
+        _buildSocialIcon(
+          "images/github.webp",
+          () => _handleSocialSignup("GitHub"),
+        ),
       ],
     );
   }
@@ -386,7 +465,8 @@ class _SignupScreenState extends State<SignupScreen> {
               assetPath,
               height: 28,
               width: 28,
-              errorBuilder: (context, error, stackTrace) => const Icon(Icons.error_outline),
+              errorBuilder: (context, error, stackTrace) =>
+                  const Icon(Icons.error_outline),
             ),
           ),
         ),
