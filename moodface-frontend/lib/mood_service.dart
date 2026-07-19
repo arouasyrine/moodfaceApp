@@ -2,9 +2,11 @@ import 'package:http/http.dart' as http;
 import 'dart:convert'; /*importation de la bibliothèque dart:convert pour la conversion JSON*/
 import 'dart:io'; /*importation de la bibliothèque dart:io pour la gestion des fichiers et des entrées/sorties*/
 import 'package:url_launcher/url_launcher.dart';
+import 'data_store.dart';
 
 class MoodService {
-  static const String baseUrl = "https://moodface-api.onrender.com"; // Remplacez par l'URL de votre backend
+  // Remplacez par votre domaine Ngrok statique gratuit (ex: https://mon-app.ngrok-free.app)
+  static const String baseUrl = "https://discard-salon-jumbo.ngrok-free.dev";
 
   Uri getSocialAuthUrl(String provider) {
     final normalizedProvider = provider.toLowerCase();
@@ -49,17 +51,22 @@ class MoodService {
   Future<Map<String, dynamic>?> sendImageToBackend(
     File imageFile, {
     int? userId,
+    String? modelType,
   }) async {
     try {
+      final targetModelType = modelType ?? DataStore().selectedModelType;
       final url = userId != null
-          ? "$baseUrl/predict?user_id=$userId"
-          : "$baseUrl/predict";
+          ? "$baseUrl/predict?user_id=$userId&model_type=$targetModelType"
+          : "$baseUrl/predict?model_type=$targetModelType";
       var request = http.MultipartRequest(
         'POST',
         Uri.parse(
           url,
         ), //l'URL de l'API pour la prédiction des émotions (avec ID utilisateur s'il est connecté)
       );
+
+      // Contourner la page d'avertissement de Ngrok pour éviter les erreurs de format JSON
+      request.headers['ngrok-skip-browser-warning'] = 'true';
 
       // Ajouter le fichier image
       request.files.add(
@@ -91,7 +98,10 @@ class MoodService {
   // Récupérer l'historique de l'utilisateur depuis la base de données
   Future<List<dynamic>?> getUserHistory(int userId) async {
     try {
-      final response = await http.get(Uri.parse("$baseUrl/history/$userId"));
+      final response = await http.get(
+        Uri.parse("$baseUrl/history/$userId"),
+        headers: {"ngrok-skip-browser-warning": "true"},
+      );
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -111,6 +121,7 @@ class MoodService {
         Uri.parse(
           "$baseUrl/auth/check-email?email=${Uri.encodeComponent(email)}",
         ),
+        headers: {"ngrok-skip-browser-warning": "true"},
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -128,6 +139,7 @@ class MoodService {
         Uri.parse(
           "$baseUrl/auth/check-google-account?email=${Uri.encodeComponent(email)}",
         ),
+        headers: {"ngrok-skip-browser-warning": "true"},
       );
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -143,7 +155,10 @@ class MoodService {
     try {
       final response = await http.post(
         Uri.parse("$baseUrl/login"),
-        headers: {"Content-Type": "application/json"},
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
         body: jsonEncode({
           "name": "", // name est requis par schemas.UserCreate sur le backend
           "email": email,
@@ -186,7 +201,10 @@ class MoodService {
     try {
       final response = await http.post(
         Uri.parse("$baseUrl/register"),
-        headers: {"Content-Type": "application/json"},
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
         body: jsonEncode({"name": name, "email": email, "password": password}),
       );
 
@@ -224,7 +242,10 @@ class MoodService {
     try {
       final response = await http.put(
         Uri.parse("$baseUrl/users/$userId"),
-        headers: {"Content-Type": "application/json"},
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
         body: jsonEncode({"name": name, "email": email}),
       );
 
@@ -248,7 +269,10 @@ class MoodService {
     try {
       final response = await http.put(
         Uri.parse("$baseUrl/users/$userId/change-password"),
-        headers: {"Content-Type": "application/json"},
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
         body: jsonEncode({
           "old_password": oldPassword,
           "new_password": newPassword,
@@ -271,7 +295,10 @@ class MoodService {
     try {
       final response = await http.post(
         Uri.parse("$baseUrl/forgot-password"),
-        headers: {"Content-Type": "application/json"},
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
         body: jsonEncode({"email": email}),
       );
 
@@ -296,4 +323,64 @@ class MoodService {
       return null;
     }
   }
+
+  // Mettre à jour la note, les tags et l'émotion déclarée pour une analyse
+  Future<bool> updateJournalRecord(int recordId, String note, List<String> tags, String userDeclaredEmotion) async {
+    try {
+      final response = await http.put(
+        Uri.parse("$baseUrl/history/$recordId/journal"),
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: jsonEncode({
+          "note": note,
+          "tags": tags.join(","),
+          "user_declared_emotion": userDeclaredEmotion,
+        }),
+      );
+      if (response.statusCode == 200) {
+        return true;
+      }
+      print("Erreur mise à jour journal: ${response.statusCode}");
+    } catch (e) {
+      print("Erreur Connexion Mise à jour journal: $e");
+    }
+    return false;
+  }
+
+  // Récupérer le résumé hebdomadaire généré par l'IA
+  Future<Map<String, dynamic>?> getWeeklySummary(int userId) async {
+    try {
+      final response = await http.get(
+        Uri.parse("$baseUrl/history/$userId/weekly-summary"),
+        headers: {"ngrok-skip-browser-warning": "true"},
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      print("Erreur API Weekly Summary: ${response.statusCode}");
+    } catch (e) {
+      print("Erreur Connexion Weekly Summary: $e");
+    }
+    return null;
+  }
+
+  // Supprimer un enregistrement d'historique
+  Future<bool> deleteHistoryRecord(int recordId) async {
+    try {
+      final response = await http.delete(
+        Uri.parse("$baseUrl/history/$recordId"),
+        headers: {"ngrok-skip-browser-warning": "true"},
+      );
+      if (response.statusCode == 200) {
+        return true;
+      }
+      print("Erreur suppression historique: ${response.statusCode}");
+    } catch (e) {
+      print("Erreur Connexion Suppression historique: $e");
+    }
+    return false;
+  }
 }
+

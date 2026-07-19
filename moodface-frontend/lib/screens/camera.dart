@@ -6,10 +6,17 @@ import 'dart:io';
 import '../mood_service.dart';
 import '../data_store.dart'; 
 import '../notification_service.dart';
+import 'coach_recommendations.dart';
+import 'chatbot.dart';
+import '../widgets/journal_editor.dart';
+
+
 
 class CameraScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
-  const CameraScreen({super.key, required this.cameras});
+  final bool isTab;
+  final VoidCallback? onCloseTab;
+  const CameraScreen({super.key, required this.cameras, this.isTab = false, this.onCloseTab});
 
   @override
   State<CameraScreen> createState() => _CameraScreenState();
@@ -143,9 +150,11 @@ class _CameraScreenState extends State<CameraScreen> with SingleTickerProviderSt
 
       if (mounted) {
         if (result != null && result['status'] == 'success') {
-          _saveToDataStore(result['emotion'], result['confidence'].toDouble());
+          final recordId = result['record_id'] as int?;
+          final record = _saveToDataStore(result['emotion'], result['confidence'].toDouble(), picture.path, recordId: recordId);
           NotificationService().sendAnalysisNotification(result['emotion'], "${result['confidence'].toDouble()}%");
-          _showResult(result['emotion'], result['confidence'].toDouble());
+          NotificationService().configureScheduledNotifications();
+          _showResult(result['emotion'], result['confidence'].toDouble(), record);
         } else {
           _showError(result?['message'] ?? "Erreur d'analyse");
         }
@@ -168,7 +177,7 @@ class _CameraScreenState extends State<CameraScreen> with SingleTickerProviderSt
     );
   }
 
-  void _saveToDataStore(String emotionRaw, double confidence) {
+  AnalysisRecord _saveToDataStore(String emotionRaw, double confidence, String? originalImagePath, {int? recordId}) {
     final emotionFrench = _translateEmotion(emotionRaw);
     final icon = _getEmotionIcon(emotionFrench);
     final color = _getEmotionColor(emotionFrench);
@@ -179,7 +188,27 @@ class _CameraScreenState extends State<CameraScreen> with SingleTickerProviderSt
     final hour12 = now.hour > 12 ? now.hour - 12 : (now.hour == 0 ? 12 : now.hour);
     final formattedTime = "${hour12.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')} $pmAm";
 
-    DataStore().addRecord(AnalysisRecord(
+    String? savedPath;
+    if (originalImagePath != null) {
+      try {
+        final file = File(originalImagePath);
+        if (file.existsSync()) {
+          final dir = DataStore().documentsDirectoryPath;
+          if (dir != null) {
+            final targetPath = recordId != null
+                ? "$dir/analysis_id_$recordId.png"
+                : "$dir/analysis_${now.millisecondsSinceEpoch}.png";
+            file.copySync(targetPath);
+            savedPath = targetPath;
+          }
+        }
+      } catch (e) {
+        debugPrint("Erreur lors de la copie locale de l'image de l'analyse : $e");
+      }
+    }
+
+    final newRecord = AnalysisRecord(
+      id: recordId,
       date: formattedDate,
       time: formattedTime,
       emotion: emotionFrench,
@@ -187,7 +216,11 @@ class _CameraScreenState extends State<CameraScreen> with SingleTickerProviderSt
       icon: icon,
       color: color,
       timestamp: now,
-    ));
+      imagePath: savedPath,
+    );
+
+    DataStore().addRecord(newRecord);
+    return newRecord;
   }
 
   String _translateEmotion(String emotion) {
@@ -203,7 +236,7 @@ class _CameraScreenState extends State<CameraScreen> with SingleTickerProviderSt
     }
   }
 
-  void _showResult(String emotionRaw, double confidence) {
+  void _showResult(String emotionRaw, double confidence, AnalysisRecord record) {
     final detectedEmotion = _translateEmotion(emotionRaw);
 
     showDialog(
@@ -259,20 +292,114 @@ class _CameraScreenState extends State<CameraScreen> with SingleTickerProviderSt
                   const SizedBox(height: 35),
                   SizedBox(
                     width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton(
+                    height: 50,
+                    child: ElevatedButton.icon(
                       onPressed: () {
                         final navigator = Navigator.of(context);
                         navigator.pop(); // Ferme le dialogue de résultat
-                        navigator.pop(); // Ferme la caméra et retourne à l'accueil
+                        navigator.push(
+                          MaterialPageRoute(
+                            builder: (context) => CoachRecommendationsScreen(
+                              emotion: detectedEmotion,
+                              confidence: confidence,
+                            ),
+                          ),
+                        );
                       },
+                      icon: const Icon(Icons.psychology_outlined, color: Colors.white),
+                      label: const Text(
+                        "CONSEILS DU COACH",
+                        style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.2, fontSize: 13),
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _getEmotionColor(detectedEmotion),
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                         elevation: 5,
                       ),
-                      child: const Text("TERMINER", style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.2)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        final navigator = Navigator.of(context);
+                        navigator.pop(); // Ferme le dialogue de résultat
+                        navigator.push(
+                          MaterialPageRoute(
+                            builder: (context) => ChatbotScreen(
+                              initialEmotion: detectedEmotion,
+                              initialConfidence: confidence,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.support_agent_rounded, color: Colors.white),
+                      label: const Text(
+                        "DISCUTER DE L'ANALYSE",
+                        style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.2, fontSize: 13),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.purple.shade700,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        elevation: 5,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context); // Fermer le dialogue de résultat
+                        showJournalEditorBottomSheet(
+                          context: context,
+                          record: record,
+                          onSave: () {
+                            // Rafraîchir l'UI si besoin
+                          },
+                        );
+                      },
+                      icon: const Icon(Icons.menu_book_rounded, color: Colors.white),
+                      label: const Text(
+                        "COMPLÉTER MON JOURNAL 📝",
+                        style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.2, fontSize: 13),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal.shade700,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        elevation: 5,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: OutlinedButton(
+                      onPressed: () {
+                        final navigator = Navigator.of(context);
+                        navigator.pop(); // Ferme le dialogue de résultat
+                        if (widget.isTab) {
+                          widget.onCloseTab?.call();
+                        } else {
+                          navigator.pop(); // Ferme la caméra et retourne à l'accueil
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: _getEmotionColor(detectedEmotion).withOpacity(0.5), width: 1.5),
+                        foregroundColor: _getEmotionColor(detectedEmotion),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      ),
+                      child: const Text(
+                        "RETOURNER À L'ACCUEIL",
+                        style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.1, fontSize: 12),
+                      ),
                     ),
                   ),
                 ],
@@ -327,9 +454,16 @@ class _CameraScreenState extends State<CameraScreen> with SingleTickerProviderSt
 
         if (mounted) {
           if (result != null && result['status'] == 'success') {
-            _saveToDataStore(result['emotion'], result['confidence'].toDouble());
+            final recordId = result['record_id'] as int?;
+            final record = _saveToDataStore(
+              result['emotion'],
+              result['confidence'].toDouble(),
+              image.path,
+              recordId: recordId,
+            );
             NotificationService().sendAnalysisNotification(result['emotion'], "${result['confidence'].toDouble()}%");
-            _showResult(result['emotion'], result['confidence'].toDouble());
+            NotificationService().configureScheduledNotifications();
+            _showResult(result['emotion'], result['confidence'].toDouble(), record);
           } else {
             _showError(result?['message'] ?? "Erreur d'analyse");
           }
@@ -469,7 +603,16 @@ class _CameraScreenState extends State<CameraScreen> with SingleTickerProviderSt
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _buildGlassButton(Icons.close, () => Navigator.pop(context)),
+                _buildGlassButton(
+                  widget.isTab ? Icons.arrow_back_ios_new_rounded : Icons.close, 
+                  () {
+                    if (widget.isTab) {
+                      widget.onCloseTab?.call();
+                    } else {
+                      Navigator.pop(context);
+                    }
+                  }
+                ),
                 const Text(
                   "SCANNER D'HUMEUR IA",
                   style: TextStyle(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../data_store.dart';
 import '../notification_service.dart';
+import '../translations.dart';
 
 class NotificationsSettingsScreen extends StatefulWidget {
   const NotificationsSettingsScreen({super.key});
@@ -25,12 +26,14 @@ class _NotificationsSettingsScreenState extends State<NotificationsSettingsScree
     DataStore().notificationFrequencies = _selectedFrequencies;
     
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Paramètres de notifications enregistrés"),
+      SnackBar(
+        content: Text(Translations.t('notification_saved')),
         backgroundColor: Colors.green,
-        duration: Duration(milliseconds: 800),
+        duration: const Duration(milliseconds: 800),
       ),
     );
+
+    NotificationService().configureScheduledNotifications();
 
     if (_notificationsEnabled) {
       NotificationService().sendTestNotification();
@@ -94,13 +97,13 @@ class _NotificationsSettingsScreenState extends State<NotificationsSettingsScree
                 _buildToggleCard(),
                 if (_notificationsEnabled) ...[
                   const SizedBox(height: 25),
-                  _buildSectionLabel("FRÉQUENCES DES RAPPORTS D'HUMEUR"),
+                  _buildSectionLabel(Translations.t('notification_frequencies_section')),
                   const SizedBox(height: 10),
-                  _buildFrequencyOption("Jour", "Notification Quotidienne", "Recevez chaque jour un résumé de votre humeur dominante.", Icons.today_rounded, Colors.green),
+                  _buildFrequencyOption("Jour", Translations.t('notification_daily_title'), Translations.t('notification_daily_desc'), Icons.today_rounded, Colors.green),
                   const SizedBox(height: 12),
-                  _buildFrequencyOption("Semaine", "Notification Hebdomadaire", "Recevez chaque semaine un résumé de votre humeur dominante.", Icons.date_range_rounded, Colors.blue),
+                  _buildFrequencyOption("Semaine", Translations.t('notification_weekly_title'), Translations.t('notification_weekly_desc'), Icons.date_range_rounded, Colors.blue),
                   const SizedBox(height: 12),
-                  _buildFrequencyOption("Mois", "Notification Mensuelle", "Recevez chaque mois un bilan complet de votre humeur dominante.", Icons.calendar_month_rounded, Colors.purple),
+                  _buildFrequencyOption("Mois", Translations.t('notification_monthly_title'), Translations.t('notification_monthly_desc'), Icons.calendar_month_rounded, Colors.purple),
                 ],
                 const SizedBox(height: 40),
               ],
@@ -129,22 +132,22 @@ class _NotificationsSettingsScreenState extends State<NotificationsSettingsScree
           ),
         ],
       ),
-      child: const Row(
+      child: Row(
         children: [
-          Icon(Icons.insights_rounded, color: Colors.white, size: 40),
-          SizedBox(width: 15),
+          const Icon(Icons.insights_rounded, color: Colors.white, size: 40),
+          const SizedBox(width: 15),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Humeurs Dominantes",
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                  Translations.t('notification_intro_title'),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
                 ),
-                SizedBox(height: 4),
+                const SizedBox(height: 4),
                 Text(
-                  "Sélectionnez une ou plusieurs fréquences pour rester informé de l'évolution de vos émotions dominantes.",
-                  style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+                  Translations.t('notification_intro_desc'),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
                 ),
               ],
             ),
@@ -179,17 +182,17 @@ class _NotificationsSettingsScreenState extends State<NotificationsSettingsScree
             child: const Icon(Icons.notifications_active_rounded, color: Color(0xFF6A1B9A), size: 24),
           ),
           const SizedBox(width: 15),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Activer les notifications",
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2D3142)),
+                  Translations.t('notification_enable'),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2D3142)),
                 ),
                 Text(
-                  "Autoriser l'application à m'envoyer des alertes",
-                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                  Translations.t('notification_enable_desc'),
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
                 ),
               ],
             ),

@@ -1,0 +1,30 @@
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/venv/
+**/.venv/
+**/ENV/
+**/env/
+
+# Databases
+**/*.db
+**/*.sqlite3
+
+# Environment variables
+**/.env
+
+# Flutter/Dart (already handled in subfolder but safe to have at root)
+**/build/
+**/.dart_tool/
+**/.flutter-plugins-dependencies
+
+# IDEs and editors
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

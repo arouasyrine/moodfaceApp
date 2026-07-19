@@ -2,15 +2,18 @@ import cv2 # OpenCV pour le traitement d'image
 import mediapipe as mp
 from deepface import DeepFace
 import numpy as np
+import os
 
 # Initialisation de MediaPipe Face Detection
 # model_selection=0 pour les visages proches (selfies), 1 pour les visages à plus de 2 mètres
 mp_face_detection = mp.solutions.face_detection
 face_detection = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
 
-def analyze_emotion(image_path):
+def analyze_emotion(image_path, model_type="pretrained"):
     """
-    Version sécurisée et robuste de l'analyse d'émotion.
+    Version hautement robuste et optimisée de l'analyse d'émotion.
+    Utilise une stratégie multi-détecteurs (MediaPipe -> RetinaFace -> OpenCV -> No Enforce)
+    pour garantir une détection et une classification optimales de l'émotion.
     """
     try:
         # 1. Chargement de l'image
@@ -18,45 +21,51 @@ def analyze_emotion(image_path):
         if img is None:
             return {"status": "error", "message": f"Fichier introuvable ou illisible: {image_path}"}
             
-        h, w = img.shape[:2]
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
-        # 2. Détection initiale avec MediaPipe
-        results = face_detection.process(img_rgb)
+        # Stratégie de secours multi-détecteurs
+        backends = ['mediapipe', 'retinaface', 'opencv']
+        objs = None
+        error_logs = []
 
-        # Si MediaPipe ne voit rien, on laisse DeepFace essayer quand même avec son propre détecteur
-        # car RetinaFace est plus puissant que MediaPipe.
-        
-        # 3. Analyse avec DeepFace (RetinaFace est très robuste)
-        try:
-            objs = DeepFace.analyze(
-                img_path = img, # On utilise l'image originale pour éviter les erreurs de format
-                actions = ['emotion'],
-                enforce_detection = True,
-                detector_backend = 'retinaface',
-                align = True
-            )
-        except Exception as e_deep:
-            return {"status": "error", "message": f"Erreur DeepFace: {str(e_deep)}"}
+        for backend in backends:
+            try:
+                objs = DeepFace.analyze(
+                    img_path = img,
+                    actions = ['emotion'],
+                    enforce_detection = True,
+                    detector_backend = backend,
+                    align = True
+                )
+                if objs:
+                    print(f"[INFO] Visage détecté avec succès via le moteur : {backend}")
+                    break
+            except Exception as e:
+                error_logs.append(f"{backend}: {str(e)}")
+
+        # Si aucun détecteur strict n'a trouvé de visage, on force l'analyse sans contrainte de détection
+        if not objs:
+            print("[WARNING] Aucun visage trouvé de manière stricte. Tentative avec enforce_detection=False")
+            try:
+                objs = DeepFace.analyze(
+                    img_path = img,
+                    actions = ['emotion'],
+                    enforce_detection = False,
+                    detector_backend = 'opencv',
+                    align = True
+                )
+            except Exception as e_final:
+                return {"status": "error", "message": f"Échec final de l'analyse : {str(e_final)} (Détails: {', '.join(error_logs)})"}
 
         if not objs:
             return {"status": "error", "message": "Aucun visage analysable trouvé"}
 
         result = objs[0]
         emotions = result['emotion']
-        
-        # 4. Calibration du résultat
         dominant = result['dominant_emotion']
         
-        # Si l'humeur dominante est neutre, on privilégie une émotion active
-        # seulement si elle est significative (>= 20%) et on sélectionne celle
-        # avec le score le plus élevé (plutôt que le premier clé dans le dictionnaire).
-        if dominant == 'neutral':
-            active_emotions = {k: v for k, v in emotions.items() if k != 'neutral'}
-            if active_emotions:
-                best_active_emo = max(active_emotions, key=active_emotions.get)
-                if active_emotions[best_active_emo] >= 20.0:
-                    dominant = best_active_emo
+        # Post-traitement : Si le score de l'émotion dominante est trop faible (ex: moins de 35%),
+        # l'expression est probablement neutre.
+        if emotions[dominant] < 35.0:
+            dominant = 'neutral'
 
         return {
             "status": "success",
@@ -69,8 +78,7 @@ def analyze_emotion(image_path):
         import traceback
         return {"status": "error", "message": f"Erreur système: {str(e)}", "trace": traceback.format_exc()}
 
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
 if __name__ == "__main__":
     print("Module analyzer.py prêt.")
+
+

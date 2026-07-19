@@ -138,6 +138,7 @@ class _LoginScreenState extends State<LoginScreen> {
       Navigator.pop(context); // Fermer le loader
 
       if (result != null && result['status'] == 'success') {
+        DataStore().clear();
         final userData = result['user'];
         DataStore().userId = userData['id'];
         DataStore().userName = userData['name'];
@@ -572,14 +573,6 @@ class _LoginScreenState extends State<LoginScreen> {
               offset: const Offset(0, 4),
             ),
           ],
-        ),
-        const SizedBox(height: 16),
-        _buildSocialButton(
-          title: "Se connecter avec Facebook",
-          assetPath: "images/facebook.webp",
-          onPressed: () => _handleSocialLogin("Facebook"),
-          colors: [const Color(0xFF1877F2), const Color(0xFF166FE5)],
-          textColor: Colors.white,
         ),
       ],
     );

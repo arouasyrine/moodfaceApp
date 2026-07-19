@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
+from typing import Optional
 
 # Schémas pour l'utilisateur
 class UserBase(BaseModel):
@@ -31,6 +32,9 @@ class UserResponse(UserBase):
 class EmotionRecordCreate(BaseModel):
     emotion: str
     confidence: float
+    note: Optional[str] = None
+    tags: Optional[str] = None
+    user_declared_emotion: Optional[str] = None
 
 class EmotionRecordResponse(BaseModel):
     id: int
@@ -38,6 +42,16 @@ class EmotionRecordResponse(BaseModel):
     emotion: str
     confidence: float
     timestamp: datetime
+    note: Optional[str] = None
+    tags: Optional[str] = None
+    user_declared_emotion: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+class JournalUpdateRequest(BaseModel):
+    note: Optional[str] = None
+    tags: Optional[str] = None
+    user_declared_emotion: Optional[str] = None
+
+

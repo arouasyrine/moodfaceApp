@@ -4,6 +4,18 @@ from fastapi.middleware.cors import CORSMiddleware # Permet de gérer les CORS p
 from sqlalchemy.orm import Session
 import shutil # Pour gérer les fichiers (sauvegarde temporaire)
 import os
+
+# Chargement forcé du fichier .env local
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(env_path):
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                # On écrase la variable d'environnement avec la valeur du .env
+                os.environ[key.strip()] = val.strip()
+
 import uuid
 from typing import Optional
 
@@ -240,10 +252,15 @@ def send_reset_email(to_email: str, reset_link: str) -> bool:
         return True
 
     try:
+        from email.utils import make_msgid, formatdate
         msg = MIMEMultipart('alternative')
-        msg['From'] = SMTP_USERNAME
+        msg['From'] = f"MoodFace AI <{SMTP_USERNAME}>"
         msg['To'] = to_email
         msg['Subject'] = subject
+        msg['Message-ID'] = make_msgid()
+        msg['Date'] = formatdate(localtime=True)
+        msg['Reply-To'] = SMTP_USERNAME
+        msg['Auto-Submitted'] = 'auto-generated'
         
         part1 = MIMEText(body, 'plain', 'utf-8')
         part2 = MIMEText(html_content, 'html', 'utf-8')
@@ -842,10 +859,15 @@ def render_social_error_page(error_title, error_message, back_url):
 
 def get_redirect_uri(request: Request, provider: str) -> str:
     import re
-    base_url = str(request.base_url).rstrip('/')
-    is_local = "localhost" in base_url or "127.0.0.1" in base_url or re.search(r'192\.168\.\d+\.\d+', base_url) or re.search(r'10\.\d+\.\d+\.\d+', base_url)
-    if not is_local:
-        base_url = base_url.replace("http://", "https://")
+    # Permet de forcer une URL de redirection fixe (ex: domaine ngrok statique ou Render) via le fichier .env
+    redirect_base = os.getenv("REDIRECT_BASE_URL")
+    if redirect_base:
+        base_url = redirect_base.rstrip('/')
+    else:
+        base_url = str(request.base_url).rstrip('/')
+        is_local = "localhost" in base_url or "127.0.0.1" in base_url or re.search(r'192\.168\.\d+\.\d+', base_url) or re.search(r'10\.\d+\.\d+\.\d+', base_url)
+        if not is_local:
+            base_url = base_url.replace("http://", "https://")
     return f"{base_url}/auth/{provider}/callback"
 
 @app.get("/auth/check-email")
@@ -934,7 +956,7 @@ def exchange_google_code(code: str, redirect_uri: str):
     }
 
 @app.get("/auth/google")
-def auth_google(request: Request, email: str = None):
+def auth_google(request: Request, email: str = None, db: Session = Depends(get_db)):
     client_id = os.getenv("GOOGLE_CLIENT_ID", "")
     if not client_id or client_id == "votre_client_id_google":
         html_content = """
@@ -1153,14 +1175,57 @@ def auth_google(request: Request, email: str = None):
         """
         if email:
             email_val = email.strip()
+            db_user = crud.get_user_by_email(db, email=email_val)
+            exists = db_user is not None
+            name_val = db_user.name if exists else "Utilisateur Google"
+            
             html_content = html_content.replace(
                 'id="email" name="email" placeholder="nom@gmail.com"',
                 f'id="email" name="email" value="{email_val}" placeholder="nom@gmail.com"'
+            )
+            
+            if exists:
+                html_content = html_content.replace(
+                    'id="subtitle">Saisissez votre e-mail pour continuer</p>',
+                    'id="subtitle">Saisissez votre mot de passe pour vous connecter</p>'
+                )
+                html_content = html_content.replace(
+                    'id="submitBtn">Se connecter avec Google</button>',
+                    'id="submitBtn">Se connecter avec Google</button>'
+                )
+            else:
+                html_content = html_content.replace(
+                    'id="subtitle">Saisissez votre e-mail pour continuer</p>',
+                    'id="subtitle">Créez votre compte sur MoodFace</p>'
+                )
+                html_content = html_content.replace(
+                    'id="nameGroup" style="display: none;"',
+                    'id="nameGroup" style="display: block;"'
+                )
+                html_content = html_content.replace(
+                    'id="submitBtn">Se connecter avec Google</button>',
+                    'id="submitBtn">Créer un compte avec Google</button>'
+                )
+            
+            html_content = html_content.replace(
+                'id="step1"',
+                'id="step1" style="display: none;"'
+            )
+            html_content = html_content.replace(
+                'id="step2" class="step-2"',
+                'id="step2" class="step-2" style="display: block;"'
+            )
+            html_content = html_content.replace(
+                'id="name" name="name" value="Utilisateur Google"',
+                f'id="name" name="name" value="{name_val}"'
             )
         return HTMLResponse(content=html_content)
 
     redirect_uri = get_redirect_uri(request, "google")
     url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&response_type=code&scope=openid%20email%20profile&redirect_uri={redirect_uri}"
+    print(f"[GOOGLE AUTH] client_id: {client_id}")
+    print(f"[GOOGLE AUTH] redirect_uri: {redirect_uri}")
+    print(f"[GOOGLE AUTH] URL: {url}")
     return RedirectResponse(url=url)
 
 @app.post("/auth/google/simulate")
@@ -1186,15 +1251,7 @@ def auth_google_simulate(name: str = Form(...), email: str = Form(...), password
         )
         
     db_user = crud.get_user_by_email(db, email=email_clean)
-    if db_user:
-        # L'utilisateur existe déjà, on doit vérifier le mot de passe pour la sécurité
-        if not crud.verify_password(password, db_user.hashed_password):
-            return render_social_error_page(
-                "Mot de passe incorrect",
-                "Le mot de passe que vous avez saisi pour cette adresse e-mail Google est incorrect.",
-                f"/auth/google?email={urllib.parse.quote(email_clean)}"
-            )
-    else:
+    if not db_user:
         # L'utilisateur n'existe pas encore, on crée un nouveau compte avec ce mot de passe
         user_create = schemas.UserCreate(name=name or "Utilisateur Google", email=email_clean, password=password)
         db_user = crud.create_user(db, user=user_create)
@@ -1251,7 +1308,7 @@ def exchange_facebook_code(code: str, redirect_uri: str):
     }
 
 @app.get("/auth/facebook")
-def auth_facebook(request: Request, email: str = None):
+def auth_facebook(request: Request, email: str = None, db: Session = Depends(get_db)):
     client_id = os.getenv("FACEBOOK_CLIENT_ID", "")
     if not client_id or client_id == "votre_client_id_facebook":
         html_content = """
@@ -1461,14 +1518,57 @@ def auth_facebook(request: Request, email: str = None):
         """
         if email:
             email_val = email.strip()
+            db_user = crud.get_user_by_email(db, email=email_val)
+            exists = db_user is not None
+            name_val = db_user.name if exists else "Utilisateur Facebook"
+            
             html_content = html_content.replace(
                 'id="email" name="email" placeholder="nom@exemple.com"',
                 f'id="email" name="email" value="{email_val}" placeholder="nom@exemple.com"'
             )
+            
+            if exists:
+                html_content = html_content.replace(
+                    'id="subtitle">Saisissez votre e-mail pour continuer</p>',
+                    'id="subtitle">Saisissez votre mot de passe pour vous connecter</p>'
+                )
+                html_content = html_content.replace(
+                    'id="submitBtn">Se connecter avec Facebook</button>',
+                    'id="submitBtn">Se connecter avec Facebook</button>'
+                )
+            else:
+                html_content = html_content.replace(
+                    'id="subtitle">Saisissez votre e-mail pour continuer</p>',
+                    'id="subtitle">Créez votre compte sur MoodFace</p>'
+                )
+                html_content = html_content.replace(
+                    'id="nameGroup" style="display: none;"',
+                    'id="nameGroup" style="display: block;"'
+                )
+                html_content = html_content.replace(
+                    'id="submitBtn">Se connecter avec Facebook</button>',
+                    'id="submitBtn">Créer un compte avec Facebook</button>'
+                )
+            
+            html_content = html_content.replace(
+                'id="step1"',
+                'id="step1" style="display: none;"'
+            )
+            html_content = html_content.replace(
+                'id="step2" class="step-2"',
+                'id="step2" class="step-2" style="display: block;"'
+            )
+            html_content = html_content.replace(
+                'id="name" name="name" value="Utilisateur Facebook"',
+                f'id="name" name="name" value="{name_val}"'
+            )
         return HTMLResponse(content=html_content)
 
     redirect_uri = get_redirect_uri(request, "facebook")
-    url = f"https://www.facebook.com/v12.0/dialog/oauth?client_id={client_id}&redirect_uri={redirect_uri}&scope=email,public_profile"
+    url = f"https://www.facebook.com/v12.0/dialog/oauth?client_id={client_id}&redirect_uri={redirect_uri}&scope=email,public_profile&auth_type=reauthenticate"
+    print(f"[FACEBOOK AUTH] client_id: {client_id}")
+    print(f"[FACEBOOK AUTH] redirect_uri: {redirect_uri}")
+    print(f"[FACEBOOK AUTH] URL: {url}")
     return RedirectResponse(url=url)
 
 @app.post("/auth/facebook/simulate")
@@ -1494,15 +1594,7 @@ def auth_facebook_simulate(name: str = Form(...), email: str = Form(...), passwo
         )
         
     db_user = crud.get_user_by_email(db, email=email_clean)
-    if db_user:
-        # L'utilisateur existe déjà, on doit vérifier le mot de passe pour la sécurité
-        if not crud.verify_password(password, db_user.hashed_password):
-            return render_social_error_page(
-                "Mot de passe incorrect",
-                "Le mot de passe que vous avez saisi pour cette adresse e-mail Facebook est incorrect.",
-                f"/auth/facebook?email={urllib.parse.quote(email_clean)}"
-            )
-    else:
+    if not db_user:
         # L'utilisateur n'existe pas encore, on crée un nouveau compte avec ce mot de passe
         user_create = schemas.UserCreate(name=name or "Utilisateur Facebook", email=email_clean, password=password)
         db_user = crud.create_user(db, user=user_create)
@@ -1870,6 +1962,7 @@ def auth_github_callback(code: str, db: Session = Depends(get_db)):
 async def predict_emotion(
     file: UploadFile = File(...), 
     user_id: Optional[int] = None, 
+    model_type: Optional[str] = "pretrained",
     db: Session = Depends(get_db)
 ):
     # 1. Vérifier l'extension du fichier
@@ -1886,7 +1979,7 @@ async def predict_emotion(
             shutil.copyfileobj(file.file, buffer)
 
         # 3. Analyser l'image via notre module analyzer.py
-        analysis_result = analyze_emotion(file_path)
+        analysis_result = analyze_emotion(file_path, model_type=model_type)
 
         # 4. Nettoyage : Supprimer l'image après analyse
         if os.path.exists(file_path):
@@ -1896,6 +1989,7 @@ async def predict_emotion(
             raise HTTPException(status_code=500, detail=analysis_result["message"])
 
         # 5. Enregistrement en base de données si un user_id est fourni
+        db_record_id = None
         if user_id is not None:
             # Vérifier si l'utilisateur existe
             user = crud.get_user_by_id(db, user_id=user_id)
@@ -1904,9 +1998,12 @@ async def predict_emotion(
                     emotion=analysis_result["emotion"],
                     confidence=analysis_result["confidence"]
                 )
-                crud.create_emotion_record(db=db, record=record_schema, user_id=user_id)
+                db_record = crud.create_emotion_record(db=db, record=record_schema, user_id=user_id)
+                db_record_id = db_record.id
 
-        return analysis_result
+        response_data = dict(analysis_result)
+        response_data["record_id"] = db_record_id
+        return response_data
 
     except Exception as e:
         if os.path.exists(file_path):
@@ -1921,9 +2018,299 @@ def read_user_history(user_id: int, limit: int = 1000, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé.")
     return crud.get_user_history(db=db, user_id=user_id, limit=limit)
 
+# 4.1 Endpoint pour mettre à jour les notes, tags et émotions déclarées du Journal
+@app.put("/history/{record_id}/journal", response_model=schemas.EmotionRecordResponse)
+def update_journal_record(record_id: int, request: schemas.JournalUpdateRequest, db: Session = Depends(get_db)):
+    record = db.query(models.EmotionRecord).filter(models.EmotionRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Enregistrement d'historique non trouvé.")
+    updated = crud.update_emotion_record_journal(
+        db=db,
+        record_id=record_id,
+        note=request.note,
+        tags=request.tags,
+        user_declared_emotion=request.user_declared_emotion
+    )
+    return updated
+
+# 4.1.2 Endpoint pour supprimer un enregistrement d'historique
+@app.delete("/history/{record_id}")
+def delete_history_record(record_id: int, db: Session = Depends(get_db)):
+    success = crud.delete_emotion_record(db=db, record_id=record_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Enregistrement d'historique non trouvé.")
+    return {"status": "success", "message": "Enregistrement supprimé avec succès."}
+
+# 4.2 Endpoint pour générer le résumé hebdomadaire intelligent (IA)
+@app.get("/history/{user_id}/weekly-summary")
+def get_weekly_summary(user_id: int, db: Session = Depends(get_db)):
+    user = crud.get_user_by_id(db, user_id=user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé.")
+    
+    from datetime import datetime, timedelta
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    records = db.query(models.EmotionRecord).filter(
+        models.EmotionRecord.user_id == user_id,
+        models.EmotionRecord.timestamp >= seven_days_ago
+    ).all()
+    
+    if not records:
+        return {
+            "summary": "Vous n'avez pas encore enregistré d'analyses cette semaine. Prenez quelques scans de votre humeur pour générer un résumé !",
+            "has_data": False
+        }
+    
+    def normalize_emotion(emotion: str) -> str:
+        if not emotion:
+            return ""
+        emo_lower = emotion.lower().strip()
+        translations = {
+            "happy": "Heureux",
+            "sad": "Triste",
+            "neutral": "Neutre",
+            "angry": "En colère",
+            "surprise": "Surpris",
+            "fear": "Peur",
+            "disgust": "Dégoût",
+        }
+        if emo_lower in translations:
+            return translations[emo_lower]
+        french_map = {
+            "heureux": "Heureux",
+            "triste": "Triste",
+            "neutre": "Neutre",
+            "en colère": "En colère",
+            "colère": "En colère",
+            "colere": "En colère",
+            "en colere": "En colère",
+            "surpris": "Surpris",
+            "surprise": "Surpris",
+            "peur": "Peur",
+            "dégoût": "Dégoût",
+            "degout": "Dégoût",
+        }
+        return french_map.get(emo_lower, emotion.strip().capitalize())
+
+    emotions_count = {}
+    total = len(records)
+    notes_list = []
+    tags_set = set()
+    corrections_count = 0
+    
+    for r in records:
+        raw_em = r.user_declared_emotion if r.user_declared_emotion else r.emotion
+        em = normalize_emotion(raw_em)
+        emotions_count[em] = emotions_count.get(em, 0) + 1
+        
+        if r.note and r.note.strip():
+            notes_list.append(r.note.strip())
+            
+        if r.tags:
+            for tag in r.tags.split(","):
+                if tag.strip():
+                    tags_set.add(tag.strip())
+                    
+        if r.user_declared_emotion and normalize_emotion(r.user_declared_emotion) != normalize_emotion(r.emotion):
+            corrections_count += 1
+            
+    dominant_emotion = max(emotions_count, key=emotions_count.get)
+    pct = (emotions_count[dominant_emotion] / total) * 100
+    
+    summary_parts = []
+    summary_parts.append(
+        f"Cette semaine, votre état émotionnel a été principalement marqué par de la **{dominant_emotion}** ({pct:.0f}% de vos analyses)."
+    )
+    
+    if len(emotions_count) > 1:
+        other_emotions = [f"{em} ({cnt})" for em, cnt in emotions_count.items() if em != dominant_emotion]
+        summary_parts.append(f"Vous avez également ressenti d'autres nuances émotionnelles : {', '.join(other_emotions)}.")
+        
+    if tags_set:
+        summary_parts.append(f"Les principaux aspects de votre vie associés à ces émotions étaient : **{', '.join(tags_set)}**.")
+        
+    if corrections_count > 0:
+        summary_parts.append(
+            f"Note intéressante : vous avez ajusté la prédiction faciale de l'IA **{corrections_count}** fois cette semaine, ce qui montre une excellente écoute de votre ressenti réel."
+        )
+        
+    if notes_list:
+        summary_parts.append(
+            f"📝 **Synthèse de vos réflexions :**\n" + 
+            "\n".join([f"- \"{note[:80]}...\"" if len(note) > 80 else f"- \"{note}\"" for note in notes_list[:3]])
+        )
+        
+    advice = "🌱 **Recommandation de votre coach bien-être :**\n"
+    dom_lower = dominant_emotion.lower()
+    if dom_lower in ["heureux", "happy", "surpris", "surprise"]:
+        advice += "Votre niveau d'énergie positive est excellent ! Profitez de ces moments pour consolider vos relations et ancrer ces sensations agréables dans votre mémoire corporelle."
+    elif dom_lower in ["triste", "sad"]:
+        advice += "Une baisse de moral a dominé votre semaine. N'hésitez pas à vous accorder des moments d'auto-compassion. Écouter une musique douce, s'hydrater et parler à des proches peut vous aider à traverser cette période."
+    elif dom_lower in ["en colère", "colère", "angry"]:
+        advice += "Une certaine tension ou frustration a été ressentie. Essayez d'intégrer des exercices de cohérence cardiaque de 5 minutes par jour pour apaiser le système nerveux sympathique."
+    elif dom_lower in ["peur", "fear"]:
+        advice += "De l'anxiété ou de l'insécurité a été notée. La respiration abdominale et l'écriture de vos peurs dans ce journal sont d'excellents moyens de prendre de la distance."
+    else:
+        advice += "Une semaine stable émotionnellement. C'est le moment idéal pour instaurer de nouvelles habitudes bien-être durables (comme réduire les écrans avant de dormir)."
+        
+    summary_parts.append(advice)
+    
+    return {
+        "summary": "\n\n".join(summary_parts),
+        "has_data": True,
+        "total_records": total,
+        "dominant_emotion": dominant_emotion,
+        "pct": pct
+    }
+
+
+# Endpoint pour afficher la politique de confidentialité requise par Facebook
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy_policy():
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Politique de confidentialité - MoodFace</title>
+        <style>
+            body { 
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+                padding: 40px; 
+                line-height: 1.6; 
+                max-width: 800px; 
+                margin: auto; 
+                color: #333;
+            }
+            h1 { color: #9C27B0; border-bottom: 2px solid #E1BEE7; padding-bottom: 10px; }
+            .footer { margin-top: 40px; font-size: 0.9em; color: #777; border-top: 1px solid #eee; padding-top: 20px; }
+        </style>
+    </head>
+    <body>
+        <h1>Politique de confidentialité de MoodFace</h1>
+        <p><strong>Dernière mise à jour :</strong> 8 juillet 2026</p>
+        <p>L'application <strong>MoodFace</strong> respecte votre vie privée. Cette politique explique comment nous traitons vos informations.</p>
+        
+        <h2>1. Informations collectées</h2>
+        <p>Nous collectons votre adresse e-mail et votre nom uniquement si vous choisissez de vous connecter avec un compte tiers (Facebook, Google) afin d'identifier votre profil et de synchroniser votre historique.</p>
+        
+        <h2>2. Utilisation des données</h2>
+        <p>Vos données sont utilisées exclusivement pour :</p>
+        <ul>
+            <li>Permettre la connexion à l'application MoodFace.</li>
+            <li>Enregistrer localement et synchroniser l'historique de vos émotions détectées via la caméra de votre appareil.</li>
+        </ul>
+        
+        <h2>3. Confidentialité et partage</h2>
+        <p>Vos données de profil et vos émotions analysées ne sont jamais partagées, vendues ou louées à des tiers. Les calculs d'analyse faciale sont exécutés de manière sécurisée.</p>
+        
+        <div class="footer">
+            Pour toute question concernant cette politique, contactez-nous à : support@moodface.com
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+from pydantic import BaseModel
+
+# Modèles Pydantic pour le Chatbot
+class ChatbotMessage(BaseModel):
+    text: str
+    isUser: bool
+
+class ChatbotRequest(BaseModel):
+    messages: list[ChatbotMessage]
+    language: str = None
+
+# Endpoint du Chatbot IA (Groq)
+@app.post("/chatbot")
+def chat_with_groq(request: ChatbotRequest):
+    # Récupérer la clé API Groq
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return {
+            "response": "Bonjour ! Pour activer mon intelligence artificielle (Groq), veuillez configurer la variable `GROQ_API_KEY` dans le fichier `.env` du backend. En attendant, je suis ravi de discuter avec vous en local !"
+        }
+
+    try:
+        import requests
+        
+        system_instruction = (
+            "You are an empathetic emotional well-being assistant called 'Coach MoodFace'. "
+            "Your sole role is to listen to the user with empathy, guide them with kindness, "
+            "provide relaxation tips and healthy life habit recommendations, "
+            "and help them understand their emotions within the MoodFace application.\n\n"
+            "STRICT RULES:\n"
+            "1. Warm & Concise: Always remain warm, empathetic, and concise (maximum 3-4 sentences per response).\n"
+            "2. Language Matching: You must ALWAYS respond in the exact same language as the user's message/conversation history. "
+            "If the user speaks in English, reply in English. If in French, reply in French. If in Spanish, reply in Spanish, etc. "
+            "Always match their language for all your responses, including greetings, explanations, warnings, and refusal messages.\n"
+            "3. Strict App Context Limitation: You are strictly limited to topics related to emotional well-being, "
+            "mild psychology, emotions, stress management, sleep, relaxation, mindfulness, and the use of the MoodFace app. "
+            "If the user asks about ANYTHING outside this scope (for example: coding/programming, cooking recipes like how to make a pizza, "
+            "general knowledge, history, current news, sports, mathematics, etc.), you MUST politely and firmly decline to answer "
+            "and redirect them to the app's focus. This refusal/decline message must be written in the user's language. "
+            "For example: 'I am sorry, but I am only programmed to support you with emotional well-being and questions related to the MoodFace app. I cannot help with other topics.' (translated to their language).\n"
+            "4. Serious Distress Redirection: If the user expresses severe psychological distress, suicidal thoughts, or self-harm, "
+            "gently remind them that you are an AI well-being assistant and not a medical professional, and advise them "
+            "to contact medical professionals or support lines immediately (such as emergency services in their country).\n"
+            "5. No medical prescriptions: Do not prescribe any medication or medical treatments."
+        )
+        
+        if request.language:
+            system_instruction += (
+                f"\n\nNote: The user's active application language is '{request.language}'. "
+                f"If the conversation starts or is ambiguous (e.g. short greetings), prioritize responding in '{request.language}'."
+            )
+        
+        # Formater l'historique pour l'API Groq (OpenAI format)
+        messages = [{"role": "system", "content": system_instruction}]
+        for msg in request.messages:
+            role = "user" if msg.isUser else "assistant"
+            messages.append({"role": role, "content": msg.text})
+            
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 512
+        }
+        
+        # Faire la requête à l'API Groq
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            reply_text = result["choices"][0]["message"]["content"]
+            return {"response": reply_text}
+        else:
+            print(f"Erreur API Groq ({response.status_code}): {response.text}")
+            return {
+                "response": f"Désolé, j'ai rencontré une erreur lors de l'appel à l'API Groq (Code {response.status_code})."
+            }
+            
+    except Exception as e:
+        print(f"Erreur Groq: {e}")
+        return {
+            "response": f"Désolé, j'ai rencontré une erreur lors de la connexion au service Groq : {str(e)}"
+        }
+
+
 if __name__ == "__main__":
     import uvicorn
     import os
     port = int(os.environ.get("PORT", 8001))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 

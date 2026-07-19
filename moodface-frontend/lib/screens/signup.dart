@@ -144,8 +144,33 @@ class _SignupScreenState extends State<SignupScreen> {
     return true;
   }
 
+  bool _validateSocialSignupCredentials(String provider) {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) return true;
+
+    if (!_isValidEmail(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Veuillez entrer un email $provider valide.",
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
+
   void _handleSocialSignup(String provider) async {
-    if (provider == "Google") {
+    if (!mounted) return;
+
+    if (!_validateSocialSignupCredentials(provider)) {
+      return;
+    }
+
+    final email = _emailController.text.trim();
+    if (provider.toLowerCase() == 'google' && email.isNotEmpty) {
       if (!await _confirmGoogleAccountExists()) {
         return;
       }
@@ -158,7 +183,10 @@ class _SignupScreenState extends State<SignupScreen> {
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
 
-    final launched = await _moodService.launchSocialAuth(provider);
+    final launched = await _moodService.launchSocialAuth(
+      provider,
+      email: email.isNotEmpty ? email : null,
+    );
 
     if (!mounted) return;
     Navigator.pop(context); // Close loading
@@ -418,57 +446,84 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   Widget _buildSocialSignupSection() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Column(
       children: [
-        _buildSocialIcon(
-          "images/google.webp",
-          () => _handleSocialSignup("Google"),
-        ),
-        const SizedBox(width: 25),
-        _buildSocialIcon(
-          "images/facebook.webp",
-          () => _handleSocialSignup("Facebook"),
-        ),
-        const SizedBox(width: 25),
-        _buildSocialIcon(
-          "images/github.webp",
-          () => _handleSocialSignup("GitHub"),
+        _buildSocialButton(
+          title: "S'inscrire avec Google",
+          assetPath: "images/google.webp",
+          onPressed: () => _handleSocialSignup("Google"),
+          colors: [Colors.white, Colors.white],
+          textColor: const Color(0xFF3C4043),
+          border: Border.all(color: Colors.grey.shade300, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildSocialIcon(String assetPath, VoidCallback onTap) {
+  Widget _buildSocialButton({
+    required String title,
+    required String assetPath,
+    required VoidCallback onPressed,
+    required List<Color> colors,
+    required Color textColor,
+    Border? border,
+    List<BoxShadow>? boxShadow,
+  }) {
     return Container(
-      width: 55,
-      height: 55,
+      width: double.infinity,
+      height: 58,
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
+        borderRadius: BorderRadius.circular(18),
+        gradient: LinearGradient(
+          colors: colors,
+        ),
+        border: border,
+        boxShadow: boxShadow ?? [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
-        border: Border.all(color: Colors.grey.shade50),
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Center(
-            child: Image.asset(
-              assetPath,
-              height: 28,
-              width: 28,
-              errorBuilder: (context, error, stackTrace) =>
-                  const Icon(Icons.error_outline),
-            ),
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
           ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset(
+              assetPath,
+              height: 24,
+              width: 24,
+              errorBuilder: (context, error, stackTrace) => const Icon(
+                Icons.error_outline,
+                color: Colors.grey,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: textColor,
+              ),
+            ),
+          ],
         ),
       ),
     );

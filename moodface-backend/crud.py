@@ -89,12 +89,35 @@ def create_emotion_record(db: Session, record: schemas.EmotionRecordCreate, user
     db_record = models.EmotionRecord(
         user_id=user_id,
         emotion=record.emotion,
-        confidence=record.confidence
+        confidence=record.confidence,
+        note=record.note,
+        tags=record.tags,
+        user_declared_emotion=record.user_declared_emotion
     )
     db.add(db_record)
     db.commit()
     db.refresh(db_record)
     return db_record
 
+def update_emotion_record_journal(db: Session, record_id: int, note: str, tags: str, user_declared_emotion: str):
+    db_record = db.query(models.EmotionRecord).filter(models.EmotionRecord.id == record_id).first()
+    if db_record:
+        db_record.note = note
+        db_record.tags = tags
+        db_record.user_declared_emotion = user_declared_emotion
+        db.commit()
+        db.refresh(db_record)
+    return db_record
+
 def get_user_history(db: Session, user_id: int, limit: int = 100):
     return db.query(models.EmotionRecord).filter(models.EmotionRecord.user_id == user_id).order_by(models.EmotionRecord.timestamp.desc()).limit(limit).all()
+
+def delete_emotion_record(db: Session, record_id: int) -> bool:
+    db_record = db.query(models.EmotionRecord).filter(models.EmotionRecord.id == record_id).first()
+    if db_record:
+        db.delete(db_record)
+        db.commit()
+        return True
+    return False
+
+

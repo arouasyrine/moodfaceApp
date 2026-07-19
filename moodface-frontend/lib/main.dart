@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'screens/login.dart';
+import 'screens/onboarding.dart';
 import 'notification_service.dart';
+import 'data_store.dart';
 
 late List<CameraDescription> cameras;
 
-Future<void> main() async/*la fonction main est asynchrone car nous devons attendre l'initialisation des caméras avant de lancer l'application*/ {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   cameras = await availableCameras();
   await NotificationService().init();
+  await DataStore().initDir();
+
   runApp(const MoodFaceApp());
 }
 
@@ -17,17 +20,32 @@ class MoodFaceApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,//supprime le bandeau de debug en haut à droite de l'application
-      title: 'MoodFace AI',
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        useMaterial3: true,
-        colorSchemeSeed: const Color.fromARGB(255, 179, 88, 193),
-        visualDensity: VisualDensity.adaptivePlatformDensity,/*ajuster la densité visuelle selon la plateforme*/
-      ),
-      // Start with LoginScreen
-      home: LoginScreen(cameras: cameras),
+    return ValueListenableBuilder<String>(
+      valueListenable: DataStore().languageNotifier,
+      builder: (context, language, child) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'MoodFace AI',
+          theme: ThemeData(
+            brightness: Brightness.light,
+            useMaterial3: true,
+            colorSchemeSeed: const Color.fromARGB(255, 179, 88, 193),
+            scaffoldBackgroundColor: const Color(0xFFFBF6FF),
+            visualDensity: VisualDensity.adaptivePlatformDensity,
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              iconTheme: IconThemeData(color: Color(0xFF4A148C)),
+              titleTextStyle: TextStyle(
+                color: Color(0xFF4A148C),
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          home: OnboardingScreen(cameras: cameras),
+        );
+      },
     );
   }
 }

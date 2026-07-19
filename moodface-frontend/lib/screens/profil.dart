@@ -11,7 +11,9 @@ import 'package:image_cropper/image_cropper.dart';
 
 class ProfilScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
-  const ProfilScreen({super.key, required this.cameras});
+  final bool isTab;
+  final VoidCallback? onCloseTab;
+  const ProfilScreen({super.key, required this.cameras, this.isTab = false, this.onCloseTab});
 
   @override
   State<ProfilScreen> createState() => _ProfilScreenState();
@@ -291,6 +293,8 @@ class _ProfilScreenState extends State<ProfilScreen> {
       },
     );
   }
+
+
 
   Widget _buildLanguageTile(String languageName) {
     final isSelected = DataStore().appLanguage == languageName;
@@ -673,24 +677,27 @@ class _ProfilScreenState extends State<ProfilScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        leading: Container(
-          margin: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
-            ],
-          ),
-          child: IconButton(
-            icon: const Icon(
-              Icons.arrow_back_ios_new_rounded,
-              color: Color(0xFF4A148C),
-              size: 18,
-            ),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ),
+        automaticallyImplyLeading: !widget.isTab,
+        leading: widget.isTab
+            ? null
+            : Container(
+                margin: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
+                  ],
+                ),
+                child: IconButton(
+                  icon: const Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    color: Color(0xFF4A148C),
+                    size: 18,
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
         title: Text(
           Translations.t('profile_title'),
           style: const TextStyle(
@@ -765,6 +772,7 @@ class _ProfilScreenState extends State<ProfilScreen> {
                                   ? (DataStore().notificationFrequencies.isEmpty
                                         ? Translations.t('none')
                                         : DataStore().notificationFrequencies
+                                              .map((f) => Translations.translateFrequency(f))
                                               .join(', '))
                                   : Translations.t('disabled'),
                               Colors.blueAccent,
@@ -786,6 +794,7 @@ class _ProfilScreenState extends State<ProfilScreen> {
                               Colors.orangeAccent,
                               onTap: _showLanguageSelectionBottomSheet,
                             ),
+
                             _buildSettingsTile(
                               Icons.lock_outline_rounded,
                               Translations.t('settings_security'),
@@ -1018,16 +1027,23 @@ class _ProfilScreenState extends State<ProfilScreen> {
                       color: Color(0xFF2D3142),
                     ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 10),
                   if (trailing.isNotEmpty)
-                    Text(
-                      trailing,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade500,
-                        fontWeight: FontWeight.bold,
+                    Expanded(
+                      child: Text(
+                        trailing,
+                        textAlign: TextAlign.end,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade500,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
+                    )
+                  else
+                    const Spacer(),
                   const SizedBox(width: 8),
                   Icon(
                     Icons.arrow_forward_ios_rounded,
